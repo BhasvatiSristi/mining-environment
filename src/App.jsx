@@ -423,12 +423,31 @@ function BenchInfoPanel({ bench, onClose }) {
   )
 }
 
-function EntityInfoPanel({ entity, onClose }) {
+function EntityInfoPanel({
+  entity,
+  onClose,
+  runtimeDisplayScale,
+  onRuntimeDisplayScaleChange,
+  runtimePosition,
+  onRuntimePositionChange,
+  onRuntimePositionReset,
+}) {
+  const [positionDraft, setPositionDraft] = useState(() => runtimePosition?.map((value) => String(value)) ?? [])
   const isImportedEntity = entity.source === 'twinforge'
   const typeLabel = entityTypeLabels[entity.type] ?? (isImportedEntity ? 'Imported Model' : entity.type)
   const parameterSummary = entity.parameters?.length
     ? entity.parameters.map((parameter) => `${parameter.name}: ${parameter.value}${parameter.unit ? ` ${parameter.unit}` : ''}`).join(', ')
     : null
+
+  const commitPosition = (axis) => {
+    const value = Number(positionDraft[axis])
+    if (Number.isFinite(value)) {
+      onRuntimePositionChange(axis, value)
+      return
+    }
+
+    setPositionDraft((current) => current.map((draft, index) => index === axis ? String(runtimePosition[axis]) : draft))
+  }
 
   return (
     <aside className="bench-panel" aria-labelledby="entity-panel-title">
@@ -452,8 +471,57 @@ function EntityInfoPanel({ entity, onClose }) {
         {isImportedEntity && <div><dt>Children</dt><dd>{entity.childIds?.length ?? 0}</dd></div>}
         {parameterSummary && <div><dt>Parameters</dt><dd>{parameterSummary}</dd></div>}
       </dl>
+      {isImportedEntity && (
+        <>
+          <label className="runtime-scale-control">
+            <span>Runtime Scale</span>
+            <input
+              type="number"
+              min="0.1"
+              max="2"
+              step="0.1"
+              value={runtimeDisplayScale.toFixed(2)}
+              onChange={(event) => onRuntimeDisplayScaleChange(Number(event.target.value))}
+            />
+          </label>
+          <fieldset className="runtime-position-control">
+            <legend>Position</legend>
+            {['x', 'y', 'z'].map((axis, index) => (
+              <label key={axis}>
+                <span>{axis.toUpperCase()}</span>
+                <input
+                  type="number"
+                  step="1"
+                  value={positionDraft[index]}
+                  onChange={(event) => setPositionDraft((current) => current.map((draft, draftIndex) => draftIndex === index ? event.target.value : draft))}
+                  onBlur={() => commitPosition(index)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault()
+                      event.currentTarget.blur()
+                    }
+                  }}
+                />
+              </label>
+            ))}
+            <button type="button" onClick={onRuntimePositionReset}>Reset Position</button>
+          </fieldset>
+        </>
+      )}
     </aside>
   )
+}
+
+function getHierarchyRootId(entity, entitiesById) {
+  let currentEntity = entity
+  const visitedIds = new Set()
+
+  while (currentEntity?.parentId && entitiesById.has(currentEntity.parentId) && !visitedIds.has(currentEntity.id)) {
+    visitedIds.add(currentEntity.id)
+    currentEntity = entitiesById.get(currentEntity.parentId)
+  }
+
+  return currentEntity?.id ?? entity.id
 }
 
 function App() {
@@ -463,6 +531,8 @@ function App() {
   const [importStatus, setImportStatus] = useState(null)
   const [isImporting, setIsImporting] = useState(false)
   const [modelLoadStatus, setModelLoadStatus] = useState(null)
+  const [runtimeDisplayScaleByModelId, setRuntimeDisplayScaleByModelId] = useState({})
+  const [runtimePositionOffsetByModelId, setRuntimePositionOffsetByModelId] = useState({})
   const fileInputRef = useRef(null)
   const importedTwinEntities = useMemo(
     () => (importedTwin
@@ -472,6 +542,10 @@ function App() {
   )
   const runtimeEntities = useMemo(
     () => [...environmentEntities, ...importedTwinEntities],
+    [importedTwinEntities],
+  )
+  const importedEntitiesById = useMemo(
+    () => new Map(importedTwinEntities.map((entity) => [entity.id, entity])),
     [importedTwinEntities],
   )
 
@@ -507,6 +581,8 @@ function App() {
     try {
       const result = await importDigitalTwin(file)
       setImportedTwin(result)
+      setRuntimeDisplayScaleByModelId({})
+      setRuntimePositionOffsetByModelId({})
       setModelLoadStatus(null)
       setImportStatus({
         type: 'success',
@@ -536,6 +612,8 @@ function App() {
         <ImportedTwinModels
           importedTwin={importedTwin}
           runtimeEntities={runtimeEntities}
+          runtimeDisplayScaleByModelId={runtimeDisplayScaleByModelId}
+          runtimePositionOffsetByModelId={runtimePositionOffsetByModelId}
           selectedEntity={selectedEntity}
           onEntitySelect={handleEntitySelect}
           onStatus={setModelLoadStatus}
@@ -579,7 +657,52 @@ function App() {
         )}
       </section>
       {selectedBench && <BenchInfoPanel bench={selectedBench} onClose={() => setSelectedBench(null)} />}
-      {selectedEntity && <EntityInfoPanel entity={selectedEntity} onClose={() => setSelectedEntity(null)} />}
+      {selectedEntity && (
+        <EntityInfoPanel
+          key={selectedEntity.id}
+          entity={importedEntitiesById.get(selectedEntity.id) ?? selectedEntity}
+          onClose={() => setSelectedEntity(null)}
+          runtimeDisplayScale={selectedEntity.source === 'twinforge'
+            ? runtimeDisplayScaleByModelId[getHierarchyRootId(importedEntitiesById.get(selectedEntity.id) ?? selectedEntity, importedEntitiesById)] ?? 1
+            : null}
+          runtimePosition={selectedEntity.source === 'twinforge'
+            ? (() => {
+              const currentEntity = importedEntitiesById.get(selectedEntity.id) ?? selectedEntity
+              const rootId = getHierarchyRootId(currentEntity, importedEntitiesById)
+              const rootEntity = importedEntitiesById.get(rootId) ?? currentEntity
+              const delta = runtimePositionOffsetByModelId[rootId] ?? [0, 0, 0]
+              return rootEntity.finalPosition.map((value, index) => value + delta[index])
+            })()
+            : null}
+          onRuntimePositionChange={(axis, value) => {
+            if (selectedEntity.source !== 'twinforge') return
+            if (!Number.isFinite(value)) return
+            const currentEntity = importedEntitiesById.get(selectedEntity.id) ?? selectedEntity
+            const rootId = getHierarchyRootId(currentEntity, importedEntitiesById)
+            const originalRootEntity = importedEntitiesById.get(rootId) ?? currentEntity
+            const nextDelta = [...(runtimePositionOffsetByModelId[rootId] ?? [0, 0, 0])]
+            nextDelta[axis] = value - originalRootEntity.finalPosition[axis]
+            setRuntimePositionOffsetByModelId((current) => ({ ...current, [rootId]: nextDelta }))
+          }}
+          onRuntimePositionReset={() => {
+            if (selectedEntity.source !== 'twinforge') return
+            const currentEntity = importedEntitiesById.get(selectedEntity.id) ?? selectedEntity
+            const rootId = getHierarchyRootId(currentEntity, importedEntitiesById)
+            setRuntimePositionOffsetByModelId((current) => {
+              const next = { ...current }
+              delete next[rootId]
+              return next
+            })
+          }}
+          onRuntimeDisplayScaleChange={(value) => {
+            if (selectedEntity.source !== 'twinforge') return
+            if (!Number.isFinite(value)) return
+            const rootId = getHierarchyRootId(selectedEntity, importedEntitiesById)
+            const clampedValue = Math.min(2, Math.max(0.1, value))
+            setRuntimeDisplayScaleByModelId((current) => ({ ...current, [rootId]: clampedValue }))
+          }}
+        />
+      )}
     </main>
   )
 }

@@ -259,6 +259,70 @@
   text-align: right;
 }
 
+.runtime-scale-control,
+.runtime-position-control {
+  display: grid;
+  gap: 9px;
+  margin-top: 20px;
+}
+
+.runtime-scale-control span,
+.runtime-position-control legend,
+.runtime-position-control label span {
+  color: rgba(248, 240, 221, 0.56);
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+}
+
+.runtime-scale-control input,
+.runtime-position-control input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 32px;
+  padding: 6px 8px;
+  border: 1px solid rgba(248, 240, 221, 0.24);
+  border-radius: 3px;
+  background: rgba(248, 240, 221, 0.08);
+  color: #f8f0dd;
+  font: inherit;
+}
+
+.runtime-position-control {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+}
+
+.runtime-position-control legend {
+  padding: 0;
+}
+
+.runtime-position-control label {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.runtime-position-control button {
+  justify-self: start;
+  margin-top: 4px;
+  padding: 7px 10px;
+  border: 1px solid rgba(232, 186, 117, 0.55);
+  border-radius: 3px;
+  background: transparent;
+  color: #f8f0dd;
+  cursor: pointer;
+  font: inherit;
+}
+
+.runtime-position-control button:hover,
+.runtime-position-control button:focus-visible {
+  border-color: #e8ba75;
+  color: #e8ba75;
+}
+
 @media (max-width: 600px) {
   .scene-header {
     top: 28px;
